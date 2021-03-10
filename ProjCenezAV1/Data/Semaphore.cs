@@ -20,8 +20,6 @@ namespace ProjCenezAV1.Data
         private TaskAwaiter CompositeTask { get; }
         private Queue<int> WaitingList { get; } = new();
 
-        private bool isFirst = true;
-
         private Semaphore(IEnumerable<ParallelTask> taskInitializers, int threadCount)
         {
             //Separate tasks into queues for each thread to operate on
@@ -90,7 +88,7 @@ namespace ProjCenezAV1.Data
                     if (WaitingList.Peek() == threadId)
                         return;
                 }
-                await Task.Delay(1);
+                await Task.Yield();
             }
         }
 
