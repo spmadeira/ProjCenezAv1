@@ -13,12 +13,16 @@ namespace ProjCenezAV1.Data
     public class Semaphore
     {
         #region Awaiter Impl
+        
         public TaskAwaiter GetAwaiter() => CompositeTask;
      
         #endregion
         
         private TaskAwaiter CompositeTask { get; }
         private Queue<int> WaitingList { get; } = new();
+        
+        private int[] level;
+        private int[] last_to_enter;
 
         private Semaphore(IEnumerable<ParallelTask> taskInitializers, int threadCount)
         {
@@ -43,6 +47,9 @@ namespace ProjCenezAV1.Data
             }
             
             enumerator.Dispose();
+            
+            level = new int[threadCount];
+            last_to_enter = new int[threadCount - 1];
 
             var tasks = taskQueues
                 .Select((q,i) => Task.Run(async () =>
@@ -65,39 +72,53 @@ namespace ProjCenezAV1.Data
                         finally
                         {
                             //Release access to the critical section
-                            SignalRelease();
+                            SignalRelease(i);
                         }
-                        
                     }
                 }));
 
             CompositeTask = Task.WhenAll(tasks).GetAwaiter();
         }
 
+        //Peterson's
         private async Task WaitForPermission(int threadId)
         {
-            lock (WaitingList)
+            //Validação de ordem em niveis
+            for (int i = 0; i < last_to_enter.Length; i++)
             {
-                WaitingList.Enqueue(threadId);
-            }
-
-            while (true)
-            {
-                lock (WaitingList)
+                //Marca que a thread está no nivel de validação I
+                level[threadId] = i;
+                //Marca que a thread foi a ultima a entrar nesse nivel
+                last_to_enter[i] = threadId;
+                
+                //Condição 1: essa thread foi a ultima a entrar nesse nivel
+                Func<bool> cond1 = () => last_to_enter[i] == threadId;
+                
+                //Condição 2: existe thread em nivel superior (mais avançada na fila)
+                Func<bool> cond2 = () =>
                 {
-                    if (WaitingList.Peek() == threadId)
-                        return;
-                }
-                await Task.Yield();
+                    var val = false;
+                    
+                    for (int k = 0; k < level.Length; k++)
+                    {
+                        if (level[k] >= i && k != threadId)
+                        {
+                            val = true;
+                            break;
+                        }
+                    }
+                    return val;
+                };
+                
+                
+                while (cond1() && cond2())
+                    await Task.Yield();
             }
         }
 
-        private void SignalRelease()
+        private void SignalRelease(int threadId)
         {
-            lock (WaitingList)
-            {
-                WaitingList.Dequeue();
-            }
+            level[threadId] = -1;
         }
 
         public static Semaphore StartFromTasks(IEnumerable<ParallelTask> tasks, int threadCount = 1)
