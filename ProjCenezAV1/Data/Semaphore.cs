@@ -19,8 +19,7 @@ namespace ProjCenezAV1.Data
         #endregion
         
         private TaskAwaiter CompositeTask { get; }
-        private Queue<int> WaitingList { get; } = new();
-        
+
         private int[] level;
         private int[] last_to_enter;
 
@@ -91,28 +90,32 @@ namespace ProjCenezAV1.Data
                 //Marca que a thread foi a ultima a entrar nesse nivel
                 last_to_enter[i] = threadId;
                 
-                //Condição 1: essa thread foi a ultima a entrar nesse nivel
-                Func<bool> cond1 = () => last_to_enter[i] == threadId;
+                //Condição 1: essa thread não foi a ultima a entrar nesse nivel
+                Func<bool> cond1 = () => last_to_enter[i] != threadId;
                 
-                //Condição 2: existe thread em nivel superior (mais avançada na fila)
+                //Condição 2: não existe thread igual ou mais avançada
                 Func<bool> cond2 = () =>
                 {
-                    var val = false;
+                    var val = true;
                     
                     for (int k = 0; k < level.Length; k++)
                     {
                         if (level[k] >= i && k != threadId)
                         {
-                            val = true;
+                            val = false;
                             break;
                         }
                     }
                     return val;
                 };
                 
-                
-                while (cond1() && cond2())
-                    await Task.Yield();
+                while (true)
+                {
+                    if (cond1() || cond2())
+                        break;
+                    else
+                        await Task.Yield();
+                }
             }
         }
 
@@ -126,6 +129,13 @@ namespace ProjCenezAV1.Data
             if (threadCount < 1)
             {
                 throw new ArgumentException("Thread Count must be equal to or greater than 1.", nameof(threadCount));
+            }
+
+            if (Environment.ProcessorCount < threadCount)
+            {
+                throw new ArgumentException(
+                    $"Thread Count must be less than or equal to the number of physical threads on the CPU. Physical threads: {Environment.ProcessorCount}",
+                    nameof(threadCount));
             }
 
             return new Semaphore(tasks, threadCount);
